@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <title>Mermaid UML Viewer（ローカル優先）</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: sans-serif;
+      display: flex;
+      height: 100vh;
+    }
+    #editor-pane {
+      width: 40%;
+      padding: 10px;
+      box-sizing: border-box;
+      background: #f9f9f9;
+      display: flex;
+      flex-direction: column;
+    }
+    #editor {
+      flex-grow: 1;
+      width: 100%;
+      font-family: monospace;
+      font-size: 14px;
+      padding: 8px;
+      resize: none;
+    }
+    #controls {
+      margin-top: 10px;
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    #preview-pane {
+      width: 60%;
+      padding: 10px;
+      box-sizing: border-box;
+      overflow: auto;
+      background: white;
+      border-left: 1px solid #ccc;
+    }
+    button {
+      padding: 6px 12px;
+      font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+
+<div id="editor-pane">
+  <textarea id="editor">sequenceDiagram
+  participant A as Alice
+  participant B as Bob
+  A->>B: Hello
+  B-->>A: Hi
+  </textarea>
+
+  <div id="controls">
+    <button id="saveBtn">保存（テキスト＋PNG）</button>
+    <input type="file" id="importFile" accept=".txt" style="display:none;" />
+    <button onclick="document.getElementById('importFile').click()">ファイル読み込み</button>
+  </div>
+</div>
+
+<div id="preview-pane">
+  <div id="preview"></div>
+</div>
+
+<!-- Mermaid.js をローカル優先で読み込み、なければCDNを使う -->
+<script>
+  function loadMermaid(callback) {
+    const script = document.createElement('script');
+    script.src = 'mermaid.min.js'; // ローカルファイルを優先
+    script.onload = () => {
+      console.log("✅ Mermaid loaded from local");
+      callback();
+    };
+    script.onerror = () => {
+      console.warn("⚠️ ローカル読み込み失敗、CDNから取得します...");
+      const cdn = document.createElement('script');
+      cdn.src = 'https://cdn.jsdelivr.net/npm/mermaid@11.9.0/dist/mermaid.min.js';
+      cdn.onload = () => {
+        console.log("✅ Mermaid loaded from CDN");
+        callback();
+      };
+      cdn.onerror = () => alert("❌ Mermaid.js を読み込めませんでした");
+      document.head.appendChild(cdn);
+    };
+    document.head.appendChild(script);
+  }
+
+  loadMermaid(() => {
+    mermaid.initialize({ startOnLoad: false, theme: "default" });
+
+
+    const textarea = document.getElementById("editor");
+    const preview = document.getElementById("preview");
+    let latestSVG = "";
+
+    function renderDiagram() {        
+      document.querySelectorAll('[id^="diagram_"], [id^="ddiagram_"]').forEach(el => el.remove());
+
+      const code = textarea.value;
+      mermaid.render("diagram_" + Date.now(), code)
+        .then(({ svg }) => {
+          preview.innerHTML = "";      
+          preview.innerHTML = svg;
+          latestSVG = svg;
+        })
+        .catch(err => {
+          preview.innerHTML = `<pre style="color:red;">${err.message}</pre>`;
+          latestSVG = "";
+        });
+    }
+
+    textarea.addEventListener("input", renderDiagram);
+    renderDiagram(); // 初期表示
+
+    // 保存（テキスト＋PNG）
+    document.getElementById("saveBtn").addEventListener("click", () => {
+      const id = Date.now()
+      const text = textarea.value;
+
+      // テキスト保存
+      const textBlob = new Blob([text], { type: "text/plain" });
+      const textURL = URL.createObjectURL(textBlob);
+      const textLink = document.createElement("a");
+      textLink.href = textURL;
+      textLink.download = "uml_"+id+".txt";
+      textLink.click();
+      URL.revokeObjectURL(textURL);
+
+      // SVG → PNG変換
+      const svgBlob = new Blob([latestSVG], { type: "image/svg+xml" });
+      const svgURL = URL.createObjectURL(svgBlob);
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        canvas.width = 1000;
+        canvas.height = 600;
+        const ctx = canvas.getContext("2d");
+        ctx.fillStyle = "#fff";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        const scale = Math.min(canvas.width / img.width, canvas.height / img.height);
+        const dw = img.width * scale;
+        const dh = img.height * scale;
+        const dx = (canvas.width - dw) / 2;
+        const dy = (canvas.height - dh) / 2;
+        ctx.drawImage(img, dx, dy, dw, dh);
+
+        canvas.toBlob(blob => {
+          const pngURL = URL.createObjectURL(blob);
+          const pngLink = document.createElement("a");
+          pngLink.href = pngURL;
+          pngLink.download = "uml_diagram_"+id+".png";
+          pngLink.click();
+          URL.revokeObjectURL(pngURL);
+        }, "image/png");
+      };
+      img.src = svgURL;
+    });
+
+    // インポート
+    document.getElementById("importFile").addEventListener("change", (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        textarea.value = reader.result;
+        renderDiagram();
+      };
+      reader.readAsText(file);
+    });
+  });
+</script>
+
+</body>
+</html>
